@@ -172,4 +172,6 @@
     <string name="drawer_style_switch_summary">修改【我的】页面样式</string>
     <string name="drawer_style_title">修改我的页面样式</string>
     <string name="drawer_style_summary">开启改为列表，关闭改为按钮</string>
+    <string name="add_korea_title">添加其他地区韩综</string>
+    <string name="add_korea_summary">在首页标签添加港澳台韩综分页</string>
 </resources>
