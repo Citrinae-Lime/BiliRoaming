@@ -67,5 +67,4 @@ jobs:
         with:
           name: snapshot
           path: |
-              ${{ github.workspace }}/app/build/outputs/apk
-              ${{ github.workspace }}/app/build/outputs/mapping
+              ${{ github.workspace }}/app/build/outputs/apk/release
