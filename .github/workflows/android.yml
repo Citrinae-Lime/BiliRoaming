@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ temp ]
+    branches: [ for-6.38 ]
 
 jobs:
   build:
