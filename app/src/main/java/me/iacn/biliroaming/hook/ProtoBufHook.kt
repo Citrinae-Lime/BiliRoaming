@@ -5,6 +5,15 @@ import me.iacn.biliroaming.utils.*
 import java.lang.reflect.Proxy
 
 class ProtoBufHook(classLoader: ClassLoader) : BaseHook(classLoader) {
+    companion object {
+        fun Any.removeCmdDms() {
+            callMethod("clearActivityMeta")
+            runCatchingOrNull {
+                callMethod("clearCommand")
+            }
+            setObjectField("unknownFields", instance.unknownFieldSetLiteInstance)
+        }
+    }
 
     private val mainListReplyClass by Weak { "com.bapis.bilibili.main.community.reply.v1.MainListReply" from mClassLoader }
     private val subjectDescriptionReplyClass by Weak { "com.bapis.bilibili.main.community.reply.v2.SubjectDescriptionReply" from mClassLoader }
@@ -108,16 +117,8 @@ class ProtoBufHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 "tFInfo", "com.bapis.bilibili.app.view.v1.TFInfoReq"
             ) { null }
             instance.dmMossClass?.hookAfterMethod(
-                "dmView", "com.bapis.bilibili.community.service.dm.v1.DmViewReq",
-            ) {
-                it.result?.run {
-                    callMethod("clearActivityMeta")
-                    runCatchingOrNull {
-                        callMethod("clearCommand")
-                    }
-                    setObjectField("unknownFields", instance.unknownFieldSetLiteInstance)
-                }
-            }
+                "dmView", instance.dmViewReqClass,
+            ) { it.result?.removeCmdDms() }
         }
         if (hidden && purifySearch) {
             "com.bapis.bilibili.app.interfaces.v1.SearchMoss".hookAfterMethod(
