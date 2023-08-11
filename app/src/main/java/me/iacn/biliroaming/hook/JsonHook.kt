@@ -44,6 +44,8 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         val searchRanksClass = "com.bilibili.search.api.SearchRanks".findClassOrNull(mClassLoader)
         val searchReferralClass =
             "com.bilibili.search.api.SearchReferral".findClassOrNull(mClassLoader)
+        val searchReferralV2Class =
+            "com.bilibili.search2.api.SearchReferral".findClassOrNull(mClassLoader)
         val followingcardSearchRanksClass =
             "com.bilibili.bplus.followingcard.net.entity.b".findClassOrNull(mClassLoader)
         val spaceClass =
@@ -312,7 +314,7 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     result.getObjectFieldOrNullAs<MutableList<*>>("splashList")?.clear()
                     result.getObjectFieldOrNullAs<MutableList<*>>("strategyList")?.clear()
                 }
-                defaultWordClass, defaultKeywordClass, searchRanksClass, searchReferralClass, followingcardSearchRanksClass -> if (sPrefs.getBoolean(
+                defaultWordClass, defaultKeywordClass, searchRanksClass, searchReferralClass, searchReferralV2Class, followingcardSearchRanksClass -> if (sPrefs.getBoolean(
                         "purify_search",
                         false
                     ) &&
