@@ -2441,8 +2441,8 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
             commentSpan = class_ {
                 name = commentSpanClass?.name ?: return@class_
             }
+            val viewIndex = dexHelper.encodeClassIndex(View::class.java)
             commentLongClick = class_ {
-                val viewIndex = dexHelper.encodeClassIndex(View::class.java)
                 val onLongClickListenerIndex = dexHelper.encodeMethodIndex(
                     View::class.java.getDeclaredMethod(
                         "setOnLongClickListener",
@@ -2600,7 +2600,6 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
                     null,
                     true
                 ).firstOrNull() ?: return@descCopy
-                val viewIndex = dexHelper.encodeClassIndex(View::class.java)
                 val clickableSpanIndex = dexHelper.encodeClassIndex(ClickableSpan::class.java)
                 dexHelper.findMethodInvoked(
                     toCopyMethodIndex,
@@ -2620,14 +2619,9 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
                 }
                 classesList.filter {
                     it.startsWith("com.bilibili.ship.theseus.ugc.intro.ugcheadline.UgcIntroductionComponent")
-                }.map {
-                    it.on(classloader)
-                }.flatMap { c ->
+                }.map { it.on(classloader) }.flatMap { c ->
                     c.declaredMethods.filter {
-                        it.isPublic
-                                && it.parameterCount == 2
-                                && it.parameterTypes[0] == View::class.java
-                                && it.parameterTypes[1] == ClickableSpan::class.java
+                        it.isPublic && it.parameterCount == 2 && it.parameterTypes[0] == View::class.java && it.parameterTypes[1] == ClickableSpan::class.java
                     }
                 }.forEach {
                     classes += class_ { name = it.declaringClass.name }
