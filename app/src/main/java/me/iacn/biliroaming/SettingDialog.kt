@@ -131,6 +131,7 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             findPreference("long_press_playback_speed")?.onPreferenceClickListener = this
             findPreference("customize_dynamic")?.onPreferenceClickListener = this
             findPreference("filter_search")?.onPreferenceClickListener = this
+            findPreference("filter_comment")?.onPreferenceClickListener = this
             checkCompatibleVersion()
             searchItems = retrieve(preferenceScreen)
             if (!isLSPBuiltIn) checkUpdate()
@@ -1083,6 +1084,18 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             return true
         }
 
+        private fun onFilterCommentClick(): Boolean {
+            CommentFilterDialog(activity, prefs).create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.window?.clearFlags(
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                or WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+                    )
+                    dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+                }
+            }.show()
+            return true
+        }
         @Deprecated("Deprecated in Java")
         override fun onPreferenceClick(preference: Preference) = when (preference.key) {
             "version" -> onVersionClick()
@@ -1107,6 +1120,7 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             "danmaku_filter" -> onDanmakuFilterClick()
             "default_speed" -> onDefaultSpeedClick()
             "filter_search" -> onFilterSearchClick()
+            "filter_comment" -> onFilterCommentClick()
             else -> false
         }
     }
