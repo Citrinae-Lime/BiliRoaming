@@ -6,9 +6,13 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Activity.RESULT_CANCELED
 import android.app.AlertDialog
-import android.app.Dialog
-import android.content.*
+import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.content.SharedPreferences
+import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
@@ -17,7 +21,10 @@ import android.os.Build
 import android.os.Bundle
 import android.preference.*
 import android.provider.MediaStore
-import android.text.*
+import android.text.Editable
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.TextWatcher
 import android.text.style.AbsoluteSizeSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
@@ -28,6 +35,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import android.widget.SeekBar.OnSeekBarChangeListener
+import android.widget.Toast
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.*
 import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
@@ -53,26 +61,6 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
         private var customSubtitleDialog: CustomSubtitleDialog? = null
         private lateinit var listView: ListView
         private lateinit var adapter: BaseAdapter
-        private val xHintColor = Color.parseColor("#2196F3")
-        private val xKeys = arrayOf(
-            "block_follow_button",
-            "text_fold",
-            "enable_download_subtitle",
-            "playback_speed_override",
-            "default_playback_speed",
-            "long_press_playback_speed",
-            "unlock_screen_orientation",
-            "remember_lossless_setting",
-            "disable_auto_subscribe",
-            "add_channel",
-            "modify_vip_section_style",
-            "skin",
-            "misc_remove_ads",
-            "trial_vip_quality",
-            "filter_story",
-            "purify_banner_ads",
-            "force_old_player",
-        )
         private var searchItems = listOf<SearchItem>()
 
         private var ListAdapter.preferenceList: List<Preference>
@@ -98,12 +86,6 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             }
             findPreference("version")?.summary = BuildConfig.VERSION_NAME
             findPreference("version")?.onPreferenceClickListener = this
-            val aboutGroup = findPreference("about") as? PreferenceCategory
-            findPreference("group")?.let { aboutGroup?.removePreference(it) }
-            val hiddenGroup = findPreference("hidden_group") as? PreferenceCategory
-            findPreference("force_th_comment")?.let { hiddenGroup?.removePreference(it) }
-            val miscGroup = findPreference("misc") as? PreferenceCategory
-            findPreference("default_speed")?.let { miscGroup?.removePreference(it) }
             findPreference("custom_splash")?.onPreferenceChangeListener = this
             findPreference("custom_splash_logo")?.onPreferenceChangeListener = this
             findPreference("save_log")?.summary =
@@ -117,24 +99,19 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             findPreference("home_filter")?.onPreferenceClickListener = this
             findPreference("custom_subtitle")?.onPreferenceChangeListener = this
             findPreference("danmaku_filter")?.onPreferenceClickListener = this
-            //findPreference("default_speed").onPreferenceClickListener = this
+            findPreference("default_speed").onPreferenceClickListener = this
             findPreference("customize_accessKey")?.onPreferenceClickListener = this
             findPreference("share_log")?.onPreferenceClickListener = this
             findPreference("customize_drawer")?.onPreferenceClickListener = this
             findPreference("custom_link")?.onPreferenceClickListener = this
             findPreference("add_custom_button")?.onPreferenceChangeListener = this
-            findPreference("skin")?.onPreferenceChangeListener = this
-            findPreference("text_fold")?.onPreferenceClickListener = this
-            findPreference("misc_remove_ads")?.onPreferenceClickListener = this
-            findPreference("playback_speed_override")?.onPreferenceClickListener = this
-            findPreference("default_playback_speed")?.onPreferenceClickListener = this
-            findPreference("long_press_playback_speed")?.onPreferenceClickListener = this
             findPreference("customize_dynamic")?.onPreferenceClickListener = this
             findPreference("filter_search")?.onPreferenceClickListener = this
             findPreference("filter_comment")?.onPreferenceClickListener = this
+            findPreference("copy_access_key")?.onPreferenceClickListener = this
             checkCompatibleVersion()
             searchItems = retrieve(preferenceScreen)
-            if (!isLSPBuiltIn) checkUpdate()
+            checkUpdate()
         }
 
         @Deprecated("Deprecated in Java")
@@ -158,18 +135,11 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
                     is MultiSelectListPreference -> preference.entries
                     else -> arrayOf()
                 }.orEmpty()
-                val key = preference.key.orEmpty()
-                val title = preference.title?.appendXMark(key) ?: ""
-                val summary = (preference.summary ?: "").let {
-                    if (key == "description") it.applyXStyle() else it
-                }
-                preference.title = title
-                preference.summary = summary
                 val searchItem = SearchItem(
                     preference,
-                    key,
-                    title,
-                    summary,
+                    preference.key.orEmpty(),
+                    preference.title ?: "",
+                    preference.summary ?: "",
                     entries,
                     preference is PreferenceGroup,
                 )
@@ -181,23 +151,6 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             }
         }
 
-        private fun CharSequence.appendXMark(key: String): CharSequence {
-            return if (key in xKeys && !this.endsWith('X')) {
-                SpannableStringBuilder(this).run {
-                    append(" X"); applyXStyle(length - 1)
-                }
-            } else this
-        }
-
-        private fun CharSequence.applyXStyle(startIdx: Int = -1) = SpannableString(this).apply {
-            val boldSpan = StyleSpan(Typeface.BOLD)
-            val colorSpan = ForegroundColorSpan(xHintColor)
-            val flags = Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            val start = if (startIdx == -1) indexOf('X') else startIdx
-            setSpan(boldSpan, start, start + 1, flags)
-            setSpan(colorSpan, start, start + 1, flags)
-        }
-
         private fun SearchItem.appendExtraKeywords() = when (key) {
             "custom_subtitle" -> {
                 extra.add(context.getString(R.string.custom_subtitle_remove_bg))
@@ -206,12 +159,6 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
                 extra.add(context.getString(R.string.custom_subtitle_stroke_color))
                 extra.add(context.getString(R.string.custom_subtitle_stroke_width))
                 extra.add(context.getString(R.string.custom_subtitle_offset))
-            }
-
-            "misc_remove_ads" -> {
-                extra.add(context.getString(R.string.remove_search_ads_title))
-                extra.add(context.getString(R.string.remove_comment_cm_title))
-                extra.add(context.getString(R.string.block_dm_feedback_title))
             }
 
             "home_filter" -> {
@@ -275,41 +222,34 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             }
         }
 
-        private var mNewestTag = ""
-
         private fun checkUpdate() {
             val url = URL(context.getString(R.string.version_url))
             scope.launch {
-                val json = fetchJsonArray(url) ?: return@launch
-                for (result in json) {
-                    val tagName = result.optString("tag_name").takeIf {
-                        it.startsWith("v")
-                    } ?: continue
-                    val newestVer = result.optString("name")
-                    val versionName = BuildConfig.VERSION_NAME
-                    if (newestVer.isNotEmpty() && versionName != newestVer) {
-                        mNewestTag = tagName
-                        searchItems.forEach { it.restore() }
-                        findPreference("version").summary = "${versionName}（最新版$newestVer）"
-                        (findPreference("about") as PreferenceCategory).addPreference(
-                            Preference(activity).apply {
-                                key = "update"
-                                title = context.getString(R.string.update_title)
-                                summary = result.optString("body")
-                                    .ifEmpty { context.getString(R.string.update_summary) }
-                                onPreferenceClickListener = this@PrefsFragment
-                                order = 1
-                            })
-                        searchItems = retrieve(preferenceScreen)
-                    }
-                    break
+                val result = fetchJson(url) ?: return@launch
+                val newestVer = result.optString("name")
+                val versionName = BuildConfig.VERSION_NAME
+                if (newestVer.isNotEmpty() && versionName != newestVer) {
+                    searchItems.forEach { it.restore() }
+                    findPreference("version").summary = "${versionName}（最新版$newestVer）"
+                    (findPreference("about") as PreferenceCategory).addPreference(
+                        Preference(activity).apply {
+                            key = "update"
+                            title = context.getString(R.string.update_title)
+                            summary = result.optString("body").substringAfterLast("更新日志\r\n")
+                                .ifEmpty { context.getString(R.string.update_summary) }
+                            onPreferenceClickListener = this@PrefsFragment
+                            order = 1
+                        })
+                    searchItems = retrieve(preferenceScreen)
                 }
             }
         }
 
         private fun checkCompatibleVersion() {
             val versionCode = getVersionCode(packageName)
-            var supportMusicNotificationHook = true
+            var supportMusicNotificationHook = versionCode >= 7500300 &&
+                    // from bilibili
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Build.MANUFACTURER.lowercase().equals("huawei")
             var supportCustomizeTab = true
             val supportFullSplash = try {
                 instance.splashInfoClass?.getMethod("getMode") != null
@@ -329,8 +269,6 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
                     supportAddTag = false
                 }
             }
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O)
-                supportMusicNotificationHook = false
             val supportSplashHook = instance.brandSplashClass != null
             val supportTeenagersMode = instance.teenagersModeDialogActivityClass != null
             val supportStoryVideo = instance.storyVideoActivityClass != null
@@ -346,10 +284,13 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
                 disablePreference("full_splash")
             }
             if (!supportMusicNotificationHook) {
-                disablePreference(
-                    "music_notification",
-                    context.getString(R.string.os_not_support)
-                )
+                if (versionCode >= 7500300) {
+                    disablePreference(
+                            "music_notification",
+                            context.getString(R.string.os_not_support))
+                } else {
+                    disablePreference("music_notification")
+                }
             }
             if (!supportMain) {
                 disablePreference("main_func", "Android O以下系统不支持64位Xpatch版，请使用32位版")
@@ -370,18 +311,13 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             }
             if (!supportPurifyShare) {
                 disablePreference("purify_share")
+                disablePreference("mini_program")
             }
             if (!supportDownloadThread) {
                 disablePreference("custom_download_thread")
             }
             if (!supportRevertLive) {
                 disablePreference("revert_live_room_feed")
-            }
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-                disablePreference(
-                    "unlock_screen_orientation",
-                    context.getString(R.string.os_not_support)
-                )
             }
             if (!supportAddTag) {
                 disablePreference("add_bangumi")
@@ -423,11 +359,6 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
                 "custom_subtitle" -> {
                     if (newValue as Boolean)
                         showCustomSubtitle()
-                }
-
-                "skin" -> {
-                    if (newValue as Boolean)
-                        onSkinClick()
                 }
 
                 "add_custom_button" -> {
@@ -511,20 +442,6 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
                     }
                 }
 
-                SKIN_IMPORT -> {
-                    val uri = data?.data
-                    if (resultCode == RESULT_CANCELED || uri == null) return
-                    try {
-                        activity.contentResolver.openInputStream(uri)
-                            ?.bufferedReader()?.use {
-                                skinInput?.setText(it.readText().trim())
-                            }
-                    } catch (e: Exception) {
-                        Log.e(e)
-                        Log.toast(e.message ?: "")
-                    }
-                }
-
                 VIDEO_EXPORT -> {
                     val videosToExport = VideoExportDialog.videosToExport
                     VideoExportDialog.videosToExport = emptySet()
@@ -560,7 +477,7 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
         }
 
         private fun onUpdateClick(): Boolean {
-            val uri = Uri.parse(context.getString(R.string.update_url, mNewestTag))
+            val uri = Uri.parse(context.getString(R.string.update_url))
             val intent = Intent(Intent.ACTION_VIEW, uri)
             startActivity(intent)
             return true
@@ -750,15 +667,6 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
                     it.setText(s)
                     it.hint = ""
                 }
-                view.findViewById<Button>(R.id.copy_key).run {
-                    visibility = View.VISIBLE
-                    setOnClickListener {
-                        ClipData.newPlainText("", instance.accessKey ?: "").let {
-                            activity.getSystemService(ClipboardManager::class.java)
-                                .setPrimaryClip(it)
-                        }
-                    }
-                }
                 setTitle(R.string.customize_accessKey_title)
                 setView(view)
                 setPositiveButton(android.R.string.ok) { _, _ ->
@@ -905,159 +813,6 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             return true
         }
 
-        private var skinInput: EditText? = null
-        private fun onSkinClick(): Boolean {
-            val view = EditText(activity)
-            skinInput = view
-            view.setText(sPrefs.getString("skin_json", null).orEmpty())
-            AlertDialog.Builder(activity)
-                .setTitle(R.string.skin_title)
-                .setView(view)
-                .setPositiveButton(android.R.string.ok, null)
-                .setNegativeButton("获取", null)
-                .setNeutralButton(R.string.skin_import_from_file, null)
-                .create().apply {
-                    setOnShowListener {
-                        getButton(Dialog.BUTTON_POSITIVE)?.setOnClickListener {
-                            val text = view.text.toString().trim()
-                            if (text.runCatchingOrNull { toJSONObject() } == null) {
-                                Log.toast("请填入有效的json格式主题", true)
-                                return@setOnClickListener
-                            }
-                            sPrefs.edit().putString("skin_json", text).apply()
-                            Log.toast("导入成功 重启两次后生效", true)
-                            dismiss()
-                        }
-                        getButton(Dialog.BUTTON_NEUTRAL)?.setOnClickListener {
-                            try {
-                                startActivityForResult(
-                                    Intent.createChooser(Intent().apply {
-                                        action = Intent.ACTION_GET_CONTENT
-                                        type = "application/json"
-                                        addCategory(Intent.CATEGORY_OPENABLE)
-                                    }, "选择文件"),
-                                    SKIN_IMPORT
-                                )
-                            } catch (ex: ActivityNotFoundException) {
-                                Log.toast("文件选择器打开失败", true)
-                            }
-                        }
-                        getButton(Dialog.BUTTON_NEGATIVE)?.setOnClickListener {
-                            val uri = Uri.parse("https://github.com/Rovniced/bilibili-skin")
-                            val intent = Intent(Intent.ACTION_VIEW, uri)
-                            startActivity(intent)
-                        }
-                    }
-                }.show()
-            return true
-        }
-
-        private fun onTextFoldClick(): Boolean {
-            TextFoldDialog(activity, prefs).show()
-            return true
-        }
-
-        private fun onPlaybackSpeedOverrideClick(): Boolean {
-            val editText = EditText(activity)
-            editText.setHint(R.string.playback_speed_override_hint)
-            editText.setText(sPrefs.getString("playback_speed_override", null).orEmpty())
-            AlertDialog.Builder(activity)
-                .setTitle(R.string.playback_speed_override_title)
-                .setView(editText)
-                .setPositiveButton(android.R.string.ok, null)
-                .setNegativeButton(android.R.string.cancel, null)
-                .create().apply {
-                    setOnShowListener {
-                        getButton(Dialog.BUTTON_POSITIVE)?.setOnClickListener {
-                            val text = editText.text.toString().trim()
-                            if (text.isEmpty()) {
-                                sPrefs.edit().remove("playback_speed_override").apply()
-                                Log.toast(
-                                    activity.getString(R.string.playback_speed_override_ok),
-                                    true
-                                )
-                                dismiss()
-                                return@setOnClickListener
-                            }
-                            val speedList = text.runCatchingOrNull {
-                                split(' ').filter { it.isNotBlank() }
-                                    .map { it.toFloat() }.filter { it > 0F && it.isFinite() }
-                            }
-                            if (speedList == null) {
-                                Log.toast(
-                                    activity.getString(R.string.playback_speed_override_invalid),
-                                    true
-                                )
-                            } else if (!speedList.contains(1F)) {
-                                Log.toast(
-                                    activity.getString(R.string.playback_speed_override_must),
-                                    true
-                                )
-                            } else {
-                                val formatSpeedText = speedList.joinToString(" ")
-                                sPrefs.edit().putString("playback_speed_override", formatSpeedText)
-                                    .apply()
-                                Log.toast(
-                                    activity.getString(R.string.playback_speed_override_ok),
-                                    true
-                                )
-                                dismiss()
-                            }
-                        }
-                    }
-                }.show()
-            return true
-        }
-
-        private fun onPlaybackSpeedClick(longPress: Boolean): Boolean {
-            val title = if (longPress) {
-                R.string.long_press_playback_speed_title
-            } else R.string.default_playback_speed_title
-            val prefKey = if (longPress) "long_press_playback_speed" else "default_playback_speed"
-            val editText = EditText(activity)
-            editText.setHint(R.string.default_playback_speed_hint)
-            editText.setText(
-                sPrefs.getFloat(prefKey, 0F).takeIf { it != 0F }?.toString().orEmpty()
-            )
-            editText.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            AlertDialog.Builder(activity)
-                .setTitle(title)
-                .setView(editText)
-                .setPositiveButton(android.R.string.ok, null)
-                .setNegativeButton(android.R.string.cancel, null)
-                .create().apply {
-                    setOnShowListener {
-                        getButton(Dialog.BUTTON_POSITIVE)?.setOnClickListener {
-                            val text = editText.text.toString().trim()
-                            if (text.isEmpty()) {
-                                sPrefs.edit().remove(prefKey).apply()
-                                Log.toast(
-                                    activity.getString(R.string.playback_speed_override_ok),
-                                    true
-                                )
-                                dismiss()
-                                return@setOnClickListener
-                            }
-                            val speed = text.toFloatOrNull()
-                            if (speed == null || speed <= 0F || !speed.isFinite()) {
-                                Log.toast(
-                                    activity.getString(R.string.playback_speed_override_invalid),
-                                    true
-                                )
-                            } else {
-                                sPrefs.edit().putFloat(prefKey, speed).apply()
-                                Log.toast(
-                                    activity.getString(R.string.playback_speed_override_ok),
-                                    true
-                                )
-                                dismiss()
-                            }
-                        }
-                    }
-                }.show()
-            return true
-        }
-
         private fun onCustomDynamicClick(): Boolean {
             DynamicFilterDialog(activity, prefs).create().also { dialog ->
                 dialog.setOnShowListener {
@@ -1096,6 +851,16 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             }.show()
             return true
         }
+
+        private fun onCopyAccessKeyClick(): Boolean {
+            val manager = context.getSystemService(ClipboardManager::class.java)
+
+            manager.setPrimaryClip(ClipData.newPlainText("access_key", instance.accessKey))
+            Toast.makeText(context, R.string.copy_access_key_toast, Toast.LENGTH_SHORT).show()
+
+            return true
+        }
+
         @Deprecated("Deprecated in Java")
         override fun onPreferenceClick(preference: Preference) = when (preference.key) {
             "version" -> onVersionClick()
@@ -1111,16 +876,12 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             "share_log" -> onShareLogClick()
             "customize_drawer" -> onCustomizeDrawerClick()
             "custom_link" -> onCustomLinkClick()
-            "text_fold" -> onTextFoldClick()
-            "misc_remove_ads" -> run { MiscRemoveAdsDialog(activity, prefs).show(); true }
-            "playback_speed_override" -> onPlaybackSpeedOverrideClick()
-            "default_playback_speed" -> onPlaybackSpeedClick(false)
-            "long_press_playback_speed" -> onPlaybackSpeedClick(true)
             "customize_dynamic" -> onCustomDynamicClick()
             "danmaku_filter" -> onDanmakuFilterClick()
             "default_speed" -> onDefaultSpeedClick()
             "filter_search" -> onFilterSearchClick()
             "filter_comment" -> onFilterCommentClick()
+            "copy_access_key" -> onCopyAccessKeyClick()
             else -> false
         }
     }
@@ -1139,7 +900,7 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             private set
 
         fun calcScoreAndApplyHintBy(text: String): Int {
-            if (text.isEmpty() || isGroup || key == "description") {
+            if (text.isEmpty() || isGroup) {
                 cacheScore = 0
                 return 0
             }
@@ -1315,14 +1076,22 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
         }
 
         fun show(context: Context) {
-            SettingDialog(context).show()
+            try {
+                SettingDialog(context).show()
+            } catch (e: Resources.NotFoundException) {
+                AlertDialog.Builder(context)
+                    .setTitle("需要重启")
+                    .setMessage("哔哩漫游更新了")
+                    .setPositiveButton("重启") { _, _ ->
+                        restartApplication(context as Activity)
+                    }.show()
+            }
         }
 
         const val SPLASH_SELECTION = 0
         const val LOGO_SELECTION = 1
         const val PREF_IMPORT = 2
         const val PREF_EXPORT = 3
-        const val SKIN_IMPORT = 100
         const val VIDEO_EXPORT = 4
     }
 }

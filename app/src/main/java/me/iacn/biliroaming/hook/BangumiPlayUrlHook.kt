@@ -32,6 +32,8 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         val qnApplied = AtomicBoolean(false)
         private const val PGC_ANY_MODEL_TYPE_URL =
             "type.googleapis.com/bilibili.app.playerunite.pgcanymodel.PGCAnyModel"
+        private const val UGC_ANY_MODEL_TYPE_URL =
+                "type.googleapis.com/bilibili.app.playerunite.ugcanymodel.UGCAnyModel"
         private val codecMap =
             mapOf(CodeType.CODE264 to 7, CodeType.CODE265 to 12, CodeType.CODEAV1 to 13)
         val supportedPlayArcIndices = arrayOf(
@@ -168,7 +170,7 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         val req = PlayViewReq.parseFrom(serializedRequest)
                         val seasonId = req.seasonId.toString().takeIf { it != "0" }
                             ?: lastSeasonInfo["season_id"] ?: "0"
-                        val (thaiSeason, thaiEp) = getThaiSeason(seasonId, req.epId)
+                        val (thaiSeason, thaiEp) = getSeasonLazy(seasonId, req.epId)
                         val content = getPlayUrl(reconstructQuery(req, response, thaiEp))
                         content?.let {
                             Log.toast("已从代理服务器获取播放地址\n如加载缓慢或黑屏，可去漫游设置中测速并设置 UPOS")
@@ -247,7 +249,7 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         val req = PlayViewReq.parseFrom(serializedRequest)
                         val seasonId = req.seasonId.toString().takeIf { it != "0" }
                             ?: lastSeasonInfo["season_id"] ?: "0"
-                        val (thaiSeason, thaiEp) = getThaiSeason(seasonId, req.epId)
+                        val (thaiSeason, thaiEp) = getSeasonLazy(seasonId, req.epId)
                         val content = getPlayUrl(reconstructQuery(req, response, thaiEp))
                         content?.let {
                             Log.toast("已从代理服务器获取播放地址\n如加载缓慢或黑屏，可去漫游设置中测速并设置 UPOS")
@@ -326,7 +328,7 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     try {
                         val serializedRequest = request.callMethodAs<ByteArray>("toByteArray")
                         val req = PlayViewUniteReq.parseFrom(serializedRequest)
-                        val (thaiSeason, thaiEp) = getThaiSeason(seasonId, reqEpId)
+                        val (thaiSeason, thaiEp) = getSeasonLazy(seasonId, reqEpId)
                         val content = getPlayUrl(reconstructQueryUnite(req, supplement, thaiEp))
                         content?.let {
                             Log.toast("已从代理服务器获取播放地址\n如加载缓慢或黑屏，可去漫游设置中测速并设置 UPOS")
@@ -429,6 +431,83 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     newResponse
                 }
             }
+            // 7.41.0+ use async
+            hookBeforeMethod(
+                "playViewUnite",
+                instance.playViewUniteReqClass,
+                instance.mossResponseHandlerClass
+            ) { param ->
+                param.args[0].callMethod("getVod")?.apply {
+                    isDownload = sPrefs.getBoolean("allow_download", false)
+                            && callMethodAs<Int>("getDownload") >= 1
+                    if (isDownload) {
+                        if (!sPrefs.getBoolean("fix_download", false)
+                            || callMethodAs<Int>("getFnval") <= 1
+                        ) {
+                            callMethod("setFnval", MAX_FNVAL)
+                            callMethod("setFourk", true)
+                        }
+                        callMethod("setDownload", 0)
+                    } else if (halfScreenQuality != 0 || fullScreenQuality != 0) {
+                        // unlock available quality limit, allow quality up to 8K
+                        callMethod("setFnval", MAX_FNVAL)
+                        callMethod("setFourk", true)
+                        if (halfScreenQuality != 0 && qnApplied.compareAndSet(false, true)) {
+                            if (halfScreenQuality != 1) {
+                                callMethod("setQn", halfScreenQuality)
+                            } else {
+                                // follow full screen quality
+                                defaultQn?.let { callMethod("setQn", it) }
+                            }
+                        }
+                    }
+                }
+                param.args[1] = param.args[1].mossResponseHandlerReplaceProxy { originalResp ->
+                    val request = param.args[0]
+                    val response =
+                        originalResp ?: "com.bapis.bilibili.app.playerunite.v1.PlayViewUniteReply"
+                            .on(mClassLoader).new()
+                    val supplementAny = response.callMethod("getSupplement")
+                    val typeUrl = supplementAny?.callMethodAs<String>("getTypeUrl")
+                    // Only handle pgc video
+                    if (originalResp != null && typeUrl != PGC_ANY_MODEL_TYPE_URL)
+                        return@mossResponseHandlerReplaceProxy null
+                    val extraContent =
+                        request.callMethodAs<Map<String, String>>("getExtraContentMap")
+                    val seasonId = extraContent.getOrDefault("season_id", "0")
+                    val reqEpId = extraContent.getOrDefault("ep_id", "0").toLong()
+                    if (seasonId == "0" && reqEpId == 0L)
+                        return@mossResponseHandlerReplaceProxy null
+                    val supplement = supplementAny?.callMethod("getValue")
+                        ?.callMethodAs<ByteArray>("toByteArray")
+                        ?.let { PlayViewReply.parseFrom(it) } ?: playViewReply {}
+                    val newResponse = if (needProxyUnite(response, supplement)) {
+                        try {
+                            val serializedRequest = request.callMethodAs<ByteArray>("toByteArray")
+                            val req = PlayViewUniteReq.parseFrom(serializedRequest)
+                            val (thaiSeason, thaiEp) = getSeasonLazy(seasonId, reqEpId)
+                            val content = getPlayUrl(reconstructQueryUnite(req, supplement, thaiEp))
+                            content?.let {
+                                Log.toast("已从代理服务器获取播放地址\n如加载缓慢或黑屏，可去漫游设置中测速并设置 UPOS")
+                                reconstructResponseUnite(
+                                    req, response, supplement, it, isDownload, thaiSeason, thaiEp
+                                )
+                            }
+                                ?: throw CustomServerException(mapOf("未知错误" to "请检查哔哩漫游设置中解析服务器设置。"))
+                        } catch (e: CustomServerException) {
+                            Log.toast("请求解析服务器发生错误: ${e.message}", alsoLog = true)
+                            showPlayerErrorUnite(
+                                response, supplement, "请求解析服务器发生错误", e.message
+                            )
+                        }
+                    } else if (isDownload) {
+                        fixDownloadProtoUnite(response)
+                    } else if (blockBangumiPageAds) {
+                        purifyViewInfo(response, supplement)
+                    } else null
+                    newResponse
+                }
+            }
         }
         instance.playURLMossClass?.hookBeforeMethod(
             "playView", instance.playViewReqClass
@@ -450,11 +529,11 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         }
     }
 
-    private fun getThaiSeason(
+    private fun getSeasonLazy(
         seasonId: String, reqEpId: Long
     ): Pair<Lazy<JSONObject>, Lazy<JSONObject>> {
         val season = lazy {
-            getSeason(mapOf("season_id" to seasonId, "ep_id" to reqEpId.toString()), true)
+            getSeason(mapOf("season_id" to seasonId, "ep_id" to reqEpId.toString()), null)
                 ?.toJSONObject()?.optJSONObject("result")
                 ?: throw CustomServerException(mapOf("解析服务器错误" to "无法获取剧集信息"))
         }

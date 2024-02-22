@@ -23,7 +23,6 @@ import me.iacn.biliroaming.network.BiliRoamingApi.getAreaSearchBangumi
 import me.iacn.biliroaming.network.BiliRoamingApi.getContent
 import me.iacn.biliroaming.network.BiliRoamingApi.getSeason
 import me.iacn.biliroaming.network.BiliRoamingApi.getSpace
-import me.iacn.biliroaming.network.BiliRoamingApi.getThaiSeason
 import me.iacn.biliroaming.utils.*
 import org.json.JSONObject
 import java.io.InputStream
@@ -63,6 +62,8 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
 
         private const val PGC_ANY_MODEL_TYPE_URL =
             "type.googleapis.com/bilibili.app.viewunite.pgcanymodel.ViewPgcAny"
+        private const val UGC_ANY_MODEL_TYPE_URL =
+            "type.googleapis.com/bilibili.app.viewunite.ugcanymodel.ViewUgcAny"
 
         private val needUnlockDownload = sPrefs.getBoolean("allow_download", false)
     }
@@ -168,7 +169,6 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
 
     private val navClass by Weak { "com.bapis.bilibili.polymer.app.search.v1.Nav" from mClassLoader }
     private val searchByTypeRespClass by Weak { "com.bapis.bilibili.polymer.app.search.v1.SearchByTypeResponse" from mClassLoader }
-    private val searchMossClass by Weak { "com.bapis.bilibili.polymer.app.search.v1.SearchMoss" from mClassLoader }
 
     @SuppressLint("SetTextI18n")
     override fun startHook() {
@@ -252,7 +252,7 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     val newStream = json?.toString()?.byteInputStream()
                     body.setObjectField(
                         instance.okio(),
-                        okioBuffer?.javaClass?.newInstance()?.apply {
+                        okioBuffer?.javaClass?.new()?.apply {
                             callMethod(instance.okioReadFrom(), newStream)
                         })
                     body.setLongField(instance.okioLength(), newStream?.available()?.toLong() ?: 0L)
@@ -337,15 +337,15 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             if (instance.networkExceptionClass?.isInstance(param.throwable) == true) return@hookAfterMethod
             val response = param.result
             if (response == null) {
-                Log.toast("发现东南亚区域番剧，尝试解锁……")
                 val req = param.args[0].callMethodAs<ByteArray>("toByteArray").let {
                     ViewUniteReq.parseFrom(it)
                 }
-                fixViewProto(req)?.toByteArray()?.let {
+                val av = (if (req.hasAid()) req.aid.takeIf { it != 0L } else if (req.hasBvid()) bv2av(req.bvid)  else null)?.toString()
+                fixViewProto(req, av)?.toByteArray()?.let {
                     param.result =
-                        "com.bapis.bilibili.app.viewunite.v1.ViewReply".from(mClassLoader)
-                            ?.callStaticMethod("parseFrom", it)
-                } ?: Log.toast("东南亚区域番剧解锁失败！", force = true)
+                            "com.bapis.bilibili.app.viewunite.v1.ViewReply".from(mClassLoader)
+                                    ?.callStaticMethod("parseFrom", it)
+                } ?: Log.toast("解锁失败！", force = true)
                 return@hookAfterMethod
             }
             val supplementAny = response.callMethod("getSupplement")
@@ -379,6 +379,7 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 "com.bilibili.bangumi.ui.page.search.BangumiSearchResultFragment".from(mClassLoader)
                     ?: "com.bilibili.search.result.bangumi.ogv.BangumiSearchResultFragment"
                         .from(mClassLoader) ?: "com.bilibili.search.ogv.OgvSearchResultFragment"
+                        .from(mClassLoader) ?: "com.bilibili.search2.ogv.OgvSearchResultFragment"
                         .from(mClassLoader)
             searchResultFragment?.run {
                 val intTypeFields = declaredFields.filter {
@@ -402,29 +403,26 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 }
             }
         }
-        val hidden = sPrefs.getBoolean("hidden", false)
-        val searchBangumi = sPrefs.getBoolean("search_area_bangumi", false)
-        val searchMovie = sPrefs.getBoolean("search_area_movie", false)
-        val removeSearchAds = sPrefs.getBoolean("remove_search_ads", false)
-        if (hidden && (searchBangumi || searchMovie || removeSearchAds)) {
-            searchMossClass?.hookBeforeMethod(
+        if (sPrefs.getBoolean("hidden", false) &&
+            (sPrefs.getBoolean("search_area_bangumi", false)
+                    || sPrefs.getBoolean("search_area_movie", false))
+        ) {
+            val mossResponseHandlerClass = instance.mossResponseHandlerClass ?: return
+            val searchMossClass =
+                "com.bapis.bilibili.polymer.app.search.v1.SearchMoss".from(mClassLoader) ?: return
+            searchMossClass.hookBeforeMethod(
                 "searchAll",
                 "com.bapis.bilibili.polymer.app.search.v1.SearchAllRequest",
-                instance.mossResponseHandlerClass
+                mossResponseHandlerClass
             ) { param ->
                 param.args[1] = param.args[1].mossResponseHandlerProxy {
-                    if (searchBangumi || searchMovie)
-                        addAreaTagsV2(it)
-                    if (removeSearchAds)
-                        removeSearchAds(it)
+                    addAreaTagsV2(it)
                 }
             }
-        }
-        if (hidden && (searchBangumi || searchMovie)) {
-            searchMossClass?.hookBeforeMethod(
+            searchMossClass.hookBeforeMethod(
                 "searchByType",
                 "com.bapis.bilibili.polymer.app.search.v1.SearchByTypeRequest",
-                instance.mossResponseHandlerClass
+                mossResponseHandlerClass
             ) { param ->
                 val searchByTypeRespClass = searchByTypeRespClass ?: return@hookBeforeMethod
                 val key =
@@ -450,15 +448,6 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 param.result = null
             }
         }
-    }
-
-    private fun removeSearchAds(v: Any?) = buildSet {
-        v?.callMethodAs<List<Any>?>("getItemList")
-            ?.onEachIndexed { idx, e ->
-                if (e.callMethodAs("hasCm")) add(idx)
-            }
-    }.reversed().forEach {
-        v?.callMethod("removeItem", it)
     }
 
     private fun addAreaTagsV2(v: Any?) {
@@ -514,15 +503,8 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             (sPrefs.getBoolean("search_area_bangumi", false)
                     || sPrefs.getBoolean("search_area_movie", false))
         ) {
-            Class.forName(
-                "com.bilibili.search.result.pages.BiliMainSearchResultPage\$PageTypes",
-                true, mClassLoader
-            ).reconstructPageType()
-            if (getVersionCode(packageName) < 7390000) return
-            Class.forName(
-                "com.bilibili.search2.result.pages.BiliMainSearchResultPage\$PageTypes",
-                true, mClassLoader
-            ).reconstructPageType()
+            "com.bilibili.search.result.pages.BiliMainSearchResultPage\$PageTypes".findClassOrNull(mClassLoader)?.reconstructPageType()
+            "com.bilibili.search2.result.pages.BiliMainSearchResultPage\$PageTypes".findClassOrNull(mClassLoader)?.reconstructPageType()
         }
     }
 
@@ -797,16 +779,6 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     private fun fixBangumi(jsonResult: JSONObject?, code: Int, url: String?) =
         if (isBangumiWithWatchPermission(jsonResult, code)) {
             BangumiPlayUrlHook.qnApplied.set(false)
-            lastSeasonInfo.clear()
-            lastSeasonInfo["title"] = jsonResult?.optString("title")
-            for (module in jsonResult?.optJSONArray("modules").orEmpty()) {
-                val data = module.optJSONObject("data")
-                val moduleEpisodes = data?.optJSONArray("episodes")
-                for (episode in moduleEpisodes.orEmpty()) {
-                    val id = episode.optString("id")
-                    lastSeasonInfo["ep_title_$id"] = episode.optString("ep_index")
-                }
-            }
             jsonResult?.also { allowDownload(it); fixEpisodesStatus(it) }
         } else {
             BangumiPlayUrlHook.qnApplied.set(false)
@@ -824,7 +796,7 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             Log.d("Info: $lastSeasonInfo")
             val (newCode, newJsonResult) = getSeason(
                 lastSeasonInfo,
-                jsonResult == null
+                jsonResult
             )?.toJSONObject()?.let {
                 it.optInt("code", FAIL_CODE) to it.optJSONObject("result")
             } ?: (FAIL_CODE to null)
@@ -846,7 +818,6 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         lastSeasonInfo[cid] = epId
                         lastSeasonInfo["ep_ids"] = lastSeasonInfo["ep_ids"]?.let { "$it;$epId" }
                             ?: epId
-                        lastSeasonInfo["ep_title_$epId"] = episode.optString("index")
                         episode.optJSONArray("subtitles")?.let {
                             if (it.length() > 0) {
                                 lastSeasonInfo["area"] = "th"
@@ -1075,6 +1046,169 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         }
     }
 
+    private fun fixViewProto(req: ViewUniteReq, av: String?): ViewUniteReply? {
+        av ?: return fixViewProto(req)
+
+        Log.toast("发现区域限制视频，尝试解锁……")
+        val query = Uri.Builder().run {
+            appendQueryParameter("id", av)
+            appendQueryParameter("bvid", req.bvid.toString())
+            appendQueryParameter("from", req.from.toString())
+            appendQueryParameter("trackid", req.trackId.toString())
+            appendQueryParameter("ad_extra", req.adExtra.toString())
+            appendQueryParameter("qn", req.playerArgs.qn.toString())
+            appendQueryParameter("fnver", req.playerArgs.fnver.toString())
+            appendQueryParameter("fnval", req.playerArgs.fnval.toString())
+            appendQueryParameter("force_host", req.playerArgs.forceHost.toString())
+            appendQueryParameter("spmid", req.spmid.toString())
+            build()
+        }.query
+
+        BiliRoamingApi.getPagelist(av) ?: return null
+
+        Log.toast("发现区域限制视频，尝试解锁……")
+
+        val content = BiliRoamingApi.getView(query)?.toJSONObject() ?: return null
+        val result = content.optJSONObject("v2_app_api") ?: return null
+        Log.w(result)
+        return viewUniteReply {
+            arc = viewUniteArc {
+                stat = viewUniteStat {
+                    result.optJSONObject("stat")?.run {
+                        reply = optLong("reply")
+                        fav = optLong("favorite")
+                        coin = optLong("coin")
+                        share = optLong("share")
+                        like = optLong("like")
+                    }
+                }
+                result.run {
+                    aid = optLong("aid")
+                    copyright = optInt("copyright")
+                    duration = optLong("duration")
+                    title = optString("title")
+                    typeId = optLong("tid")
+                    cover = optString("pic")
+                    bvid = optString("bvid")
+                    cid = optLong("cid")
+                }
+                right = viewUniteArcRights {
+                    download = true
+                    onlyVipDownload = true
+                }
+            }
+            supplement = any {
+                typeUrl = UGC_ANY_MODEL_TYPE_URL
+                value = viewUgcAny {
+                    shareSubtitle = result.optString("share_subtitle")
+                    shortLink = result.optString("short_link")
+
+                    val pages = result.optJSONArray("pages")
+                    for (page in pages.orEmpty()) {
+                        this.pages += ugcPage {
+                            page.run {
+                                dlSubtitle = optString("download_subtitle")
+                                dlTitle = optString("download_title")
+                                cid = optLong("cid")
+                                part = optString("part")
+                                duration = optLong("duration")
+                                dimension = ugcDimension {
+                                    optJSONObject("dimension")?.run {
+                                        width = optLong("width")
+                                        height = optLong("height")
+                                        rotate = optLong("rotate")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }.toByteString()
+            }
+            viewBase = viewBase {
+                bizType = 1
+            }
+            tab = tab {
+                tabModule += tabModule {
+                    tabType = TabType.TAB_INTRODUCTION
+                    introduction = introductionTab {
+                        title = "简介"
+                        modules += module {
+                            type = ModuleType.OWNER
+                        }
+                        modules += module {
+                            type = ModuleType.UGC_HEADLINE
+                            headLine = headline {
+                                this.content = result.optString("title")
+                            }
+                        }
+                        modules += module {
+                            type = ModuleType.UGC_INTRODUCTION
+                            ugcIntroduction = ugcIntroduction {
+                                desc += descV2 {
+                                    text = result.optString("desc")
+                                    type = DescType.DescTypeText
+                                }
+                                pubdate = result.optLong("ctime")
+                                val tags = result.optJSONArray("tag")
+                                for (tag in tags.orEmpty()) {
+                                    this.tags += ugcTag {
+                                        tag.run {
+                                            id = optLong("tag_id")
+                                            name = optString("tag_name")
+                                            tagType = optString("tag_type")
+                                            uri = optString("uri")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        addKingPosition()
+                    }
+                }
+                tabModule += tabModule {
+                    tabType = TabType.TAB_REPLY
+                    reply = replyTab {
+                        title = "评论"
+                        replyStyle = replyStyle {
+                            badgeType = 0L
+                        }
+                    }
+                }
+            }
+            owner = viewUniteOwner {
+                result.optJSONObject("owner_ext")?.run {
+                    officialVerify = viewUniteOfficialVerify {
+                        optJSONObject("official_verify")?.run {
+                            type = optInt("type")
+                            desc = optString("desc")
+                        }
+                    }
+                    vip = viewUniteVip {
+                        optJSONObject("vip")?.run {
+                            type = optInt("vipType")
+                            isVip = if (optInt("vipStatus") != 0) 1 else 0
+                            status = optInt("vipStatus")
+                            themeType = optInt("themeType")
+                            vipLabel = viewUniteVipLabel {
+                                optJSONObject("label")?.run {
+                                    path = optString("path")
+                                    text = optString("text")
+                                    labelTheme = optString("label_theme")
+                                }
+                            }
+                        }
+                    }
+                    fans = optLong("fans").toString()
+                    arcCount = optString("arc_count")
+                }
+                result.optJSONObject("owner")?.run {
+                    title = optString("name")
+                    face = optString("face")
+                    mid = optLong("mid")
+                }
+            }
+        }
+    }
     private fun fixViewProto(resp: Any, supplement: ViewPgcAny) {
         val isAreaLimit = supplement.ogvData.rights.areaLimit != 0
 
@@ -1116,12 +1250,12 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             Tab.parseFrom(it)
         }.copy {
             val newTabModule = tabModule.map { tabModule ->
-                tabModule.copy {
-                    if (!hasIntroduction()) return@copy
+                 tabModule.copy tab_copy@ {
+                    if (!hasIntroduction()) return@tab_copy
                     introduction = introduction.copy {
                         val newModules = modules.map { module ->
-                            module.copy {
-                                if (!hasSectionData()) return@copy
+                            module.copy module_copy@ {
+                                if (!hasSectionData()) return@module_copy
                                 sectionData = sectionData.copy {
                                     val newEpisodes = episodes.map {
                                         it.copy {
@@ -1160,7 +1294,31 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         }
     }
 
+    private fun IntroductionTabKt.Dsl.addKingPosition() {
+        modules += module {
+            type = ModuleType.KING_POSITION
+            kingPosition = kingPosition {
+                kingPos += kingPos {
+                    type = KingPos.KingPositionType.LIKE
+                }
+                kingPos += kingPos {
+                    type = KingPos.KingPositionType.COIN
+                }
+                kingPos += kingPos {
+                    type = KingPos.KingPositionType.FAV
+                }
+                kingPos += kingPos {
+                    type = KingPos.KingPositionType.CACHE
+                }
+                kingPos += kingPos {
+                    type = KingPos.KingPositionType.SHARE
+                }
+            }
+        }
+    }
+
     private fun fixViewProto(req: ViewUniteReq): ViewUniteReply? {
+        Log.toast("发现东南亚区域番剧，尝试解锁……")
         val reqEpId = req.extraContentMap["ep_id"]?.also {
             lastSeasonInfo.clear()
             lastSeasonInfo["ep_id"] = it
@@ -1170,7 +1328,7 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             lastSeasonInfo["season_id"] = it
         } ?: "0"
 
-        val seasonInfo = getThaiSeason(reqSeasonId, reqEpId)?.let {
+        val seasonInfo = getSeason(mapOf("season_id" to reqSeasonId, "ep_id" to reqEpId), null)?.toJSONObject()?.let {
             val eCode = it.optLong("code")
             if (eCode != 0L) {
                 Log.e("Invalid thai season info reply, code $eCode, message ${it.optString("message")}")
@@ -1196,16 +1354,16 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             }
         }
 
-        val introductionTab = IntroductionTab.newBuilder().apply {
+        val introductionTab = introductionTab {
             title = "简介"
-            module {
+            modules += module {
                 type = ModuleType.OGV_TITLE
                 ogvTitle = ogvTitle {
                     title = seasonInfo.optString("title")
                     reserveId = 0
                 }
-            }.let { addModules(it) }
-            module {
+            }
+            modules += module {
                 type = ModuleType.OGV_INTRODUCTION
                 ogvIntroduction = ogvIntroduction {
                     followers =
@@ -1217,12 +1375,13 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         value = seasonInfo.optJSONObject("stat")?.optLong("views") ?: 0
                     }
                 }
-            }.let { addModules(it) }
+            }
+            addKingPosition()
 
             // seasons
             seasonInfo.optJSONObject("series")?.optJSONArray("seasons")?.takeIf { it.length() > 0 }
                 ?.let { seasonArray ->
-                    module {
+                    modules += module {
                         type = ModuleType.OGV_SEASONS
                         ogvSeasons = ogvSeasons {
                             seasonArray.iterator().forEach { season ->
@@ -1234,7 +1393,7 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                                 }
                             }
                         }
-                    }.let { addModules(it) }
+                    }
                 }
 
             val reconstructSectionData = { module: JSONObject ->
@@ -1269,6 +1428,7 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                                         height = optLong("height")
                                     }
                                 }
+                                duration = episode.optInt("duration")
                                 epId = episode.optLong("id")
                                 epIndex = episode.optInt("index")
                                 from = episode.optString("from")
@@ -1309,23 +1469,32 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             seasonInfo.optJSONArray("modules")?.iterator()?.forEach { module ->
                 val style = module.optString("style")
                 if (style == "positive") {
-                    module {
+                    modules += module {
                         type = ModuleType.POSITIVE
                         sectionData = reconstructSectionData(module)
-                    }.let { addModules(it) }
+                    }
                 } else {
-                    module {
+                    modules += module {
                         type = ModuleType.SECTION
                         sectionData = reconstructSectionData(module)
-                    }.let { addModules(it) }
+                    }
                 }
             }
-        }.build()
+        }
         val tabDefault = tab {
-            tabModule.add(tabModule {
+            tabModule += tabModule {
                 tabType = TabType.TAB_INTRODUCTION
                 introduction = introductionTab
-            })
+            }
+            tabModule += tabModule {
+                tabType = TabType.TAB_REPLY
+                reply = replyTab {
+                    replyStyle = replyStyle {
+                        badgeType = 0L
+                    }
+                    title = "评论"
+                }
+            }
         }
 
         val viewPgcAny = viewPgcAny {

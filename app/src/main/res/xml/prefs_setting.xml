@@ -311,6 +311,19 @@
             android:summary="@string/default_speed_summary"
             android:title="@string/default_speed_title" />
 
+        <ListPreference
+            android:defaultValue="0"
+            android:entries="@array/pegasus_cover_ratio_entries"
+            android:entryValues="@array/pegasus_cover_ratio_values"
+            android:key="pegasus_cover_ratio"
+            android:summary="@string/pegasus_cover_ratio_summary"
+            android:title="@string/pegasus_cover_ratio_title" />
+
+        <SwitchPreference
+            android:defaultValue="false"
+            android:key="fake_non_multiwindow"
+            android:title="@string/fake_non_multiwindow_title"
+            android:summary="@string/fake_non_multiwindow_summary"/>
     </PreferenceCategory>
     <PreferenceCategory android:title="@string/pref_backup">
         <Preference
@@ -584,6 +597,11 @@
             android:dependency="hidden"
             android:key="block_video_comment"
             android:title="@string/block_video_comment_title" />
+
+        <Preference
+            android:key="copy_access_key"
+            android:title="@string/copy_access_key_title"
+            android:summary="@string/copy_access_key_summary" />
     </PreferenceCategory>
 
     <PreferenceCategory android:title="@string/setting_category">

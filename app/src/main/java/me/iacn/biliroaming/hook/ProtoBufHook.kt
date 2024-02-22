@@ -2,7 +2,6 @@ package me.iacn.biliroaming.hook
 
 import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
 import me.iacn.biliroaming.utils.*
-import java.lang.reflect.Proxy
 
 class ProtoBufHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     companion object {
@@ -26,7 +25,6 @@ class ProtoBufHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     override fun startHook() {
         val hidden = sPrefs.getBoolean("hidden", false)
         val blockLiveOrder = sPrefs.getBoolean("block_live_order", false)
-        val blockFollowButton = sPrefs.getStringSet("block_follow_button", null).orEmpty()
         val purifyCity = sPrefs.getBoolean("purify_city", false)
         val removeHonor = sPrefs.getBoolean("remove_video_honor", false)
         val removeUgcSeason = sPrefs.getBoolean("remove_video_UgcSeason", false)
@@ -58,8 +56,8 @@ class ProtoBufHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             sPrefs.getStringSet("comment_filter_keyword_at_upname", null).orEmpty()
         }
         val commentFilterBlockAtComment = sPrefs.getBoolean("comment_filter_block_at_comment", false)
+        val targetCommentAuthorLevel = sPrefs.getLong("target_comment_author_level", 0L)
         val purifyCampus = sPrefs.getBoolean("purify_campus", false)
-        val removeCommentCm = sPrefs.getBoolean("remove_comment_cm", false)
         val blockWordSearch = sPrefs.getBoolean("block_word_search", false)
         val blockModules = sPrefs.getBoolean("block_modules", false)
         val blockUpperRecommendAd = sPrefs.getBoolean("block_upper_recommend_ad", false)
@@ -151,43 +149,6 @@ class ProtoBufHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             ) { param ->
                 param.result = null
             }
-        }
-        if (hidden && removeCommentCm) {
-            "com.bapis.bilibili.main.community.reply.v1.ReplyMoss".hookBeforeMethod(
-                mClassLoader,
-                "mainList",
-                "com.bapis.bilibili.main.community.reply.v1.MainListReq",
-                instance.mossResponseHandlerClass
-            ) { param ->
-                val handler = param.args[1]
-                param.args[1] = Proxy.newProxyInstance(
-                    handler.javaClass.classLoader,
-                    arrayOf(instance.mossResponseHandlerClass)
-                ) { _, m, args ->
-                    if (m.name == "onNext") {
-                        val reply = args[0]
-                        reply?.callMethod("getCm")
-                            ?.callMethod("clearSourceContent")
-                        m(handler, *args)
-                    } else if (args == null) {
-                        m(handler)
-                    } else {
-                        m(handler, *args)
-                    }
-                }
-            }
-        }
-        if (blockFollowButton.isNotEmpty()) {
-            if (blockFollowButton.contains("comment"))
-                "com.bapis.bilibili.main.community.reply.v1.ReplyControl".from(mClassLoader)
-                    ?.replaceMethod("getShowFollowBtn") { false }
-            if (blockFollowButton.contains("dynamic"))
-                arrayOf(
-                    "com.bapis.bilibili.app.dynamic.v2.ModuleAuthor",
-                    "com.bapis.bilibili.app.dynamic.v2.ModuleAuthorForward"
-                ).forEach {
-                    it.from(mClassLoader)?.replaceMethod("getShowFollow") { false }
-                }
         }
         if (hidden && blockWordSearch) {
             "com.bapis.bilibili.main.community.reply.v1.Content".hookAfterMethod(
@@ -345,7 +306,7 @@ class ProtoBufHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     if (videoCard.getLongField("mid_") in searchFilterUid) return@filter false
                     if (videoCard.getObjectFieldAs<String>("author_") in searchFilterUpNames) return@filter false
                     if (searchFilterContentRegexMode) {
-                        if (searchFilterContentRegexes.any { it.matches(videoCard.getObjectFieldAs<String>("title_")) })
+                        if (searchFilterContentRegexes.any { it.containsMatchIn(videoCard.getObjectFieldAs<String>("title_")) })
                             return@filter false
                     } else {
                         if (searchFilterContents.any { videoCard.getObjectFieldAs<String>("title_").contains(it) }) return@filter false
@@ -355,34 +316,48 @@ class ProtoBufHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             }
         }
 
-        val needCommentFilter = hidden and (commentFilterBlockAtComment or commentFilterContents.isNotEmpty() or commentFilterAtUid.isNotEmpty() or commentFilterAtUpNames.isNotEmpty())
+        val needCommentFilter =
+            hidden && (commentFilterBlockAtComment || commentFilterContents.isNotEmpty() || commentFilterAtUid.isNotEmpty() || commentFilterAtUpNames.isNotEmpty() || targetCommentAuthorLevel != 0L)
         if (needCommentFilter) {
             val blockAtCommentSplitRegex = Regex("\\s+")
-            fun filterComment(replyInfo: Any?): Boolean {
-                if (replyInfo == null) return true
-                val content = replyInfo.getObjectField("content_")!!
-                val message = content.getObjectFieldAs<String>("message_")
-                if (commentFilterContents.isNotEmpty()) {
-                    if (commentFilterContentRegexMode) {
-                        if (commentFilterContentRegexes.any { it.matches(message) }) return false
-                    } else {
-                        if (commentFilterContents.any { message.contains(it) }) return false
-                    }
-                }
-                if (commentFilterBlockAtComment && message.trim().split(blockAtCommentSplitRegex).all { it.startsWith("@") }) return false
-                val atNameToMid = content.getObjectFieldAs<Map<String, Long>>("atNameToMid_")
-                if (commentFilterAtUpNames.isNotEmpty() && atNameToMid.keys.any { it in commentFilterAtUpNames }) return false
-                return !(commentFilterAtUid.isNotEmpty() && atNameToMid.values.any { it in commentFilterAtUid })
+
+            fun Any.validCommentAuthorLevel(): Boolean {
+                if (targetCommentAuthorLevel == 0L) return true
+                val authorLevel = getObjectField("member_")?.getObjectFieldAs<Long>("level_") ?: 6L
+                return authorLevel >= targetCommentAuthorLevel
             }
+
+            fun Any.validCommentContent(): Boolean {
+                val content = getObjectField("content_") ?: return true
+                val commentMessage = content.getObjectFieldAs<String>("message_")
+
+                val contentIsToBlock = commentFilterContents.isNotEmpty() && if (commentFilterContentRegexMode) {
+                    commentFilterContentRegexes.any { commentMessage.contains(it) }
+                } else {
+                    commentFilterContents.any { commentMessage.contains(it) }
+                }
+                if (contentIsToBlock) return false
+
+                if (commentFilterBlockAtComment && commentMessage.trim()
+                        .split(blockAtCommentSplitRegex).all { it.startsWith("@") }
+                ) return false
+
+                if (commentFilterAtUpNames.isEmpty() && commentFilterAtUid.isEmpty()) return true
+                val atNameToMid = content.getObjectFieldAs<Map<String, Long>>("atNameToMid_")
+                return !(atNameToMid.keys.any { it in commentFilterAtUpNames } || atNameToMid.values.any { it in commentFilterAtUid })
+            }
+
+            fun Any.filterComment() = validCommentAuthorLevel() && validCommentContent()
+
             "com.bapis.bilibili.main.community.reply.v1.MainListReply".from(mClassLoader)
                 ?.hookAfterMethod("getRepliesList") { p ->
                     val l = p.result as? List<*> ?: return@hookAfterMethod
-                    p.result = l.filter { filterComment(it) }
+                    p.result = l.filter { it?.filterComment() ?: true }
                 }
             "com.bapis.bilibili.main.community.reply.v1.ReplyInfo".from(mClassLoader)
                 ?.hookAfterMethod("getRepliesList") { p ->
                     val l = p.result as? List<*> ?: return@hookAfterMethod
-                    p.result = l.filter { filterComment(it) }
+                    p.result = l.filter { it?.filterComment() ?: true }
                 }
         }
 
@@ -426,6 +401,13 @@ class ProtoBufHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     }
                 }
             }
+        }
+
+        if (!sPrefs.getBoolean("replace_story_video", false)) return
+        val disableBooleanValue = "com.bapis.bilibili.app.distribution.BoolValue".from(mClassLoader)?.callStaticMethod("getDefaultInstance") ?: return
+        "com.bapis.bilibili.app.distribution.setting.play.PlayConfig".from(mClassLoader)?.run {
+            replaceAllMethods("getLandscapeAutoStory") { disableBooleanValue }
+            replaceAllMethods("getShouldAutoStory") { disableBooleanValue }
         }
     }
 }

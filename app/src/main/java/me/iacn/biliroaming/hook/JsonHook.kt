@@ -14,8 +14,6 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         Log.d("startHook: Json")
 
         val hidden = sPrefs.getBoolean("hidden", false)
-        val filterStory = sPrefs.getStringSet("filter_story", null).orEmpty()
-        val addChannel = sPrefs.getBoolean("add_channel", false)
         val purifyLivePopups = sPrefs.getStringSet("purify_live_popups", null) ?: setOf()
         val unlockPlayLimit = sPrefs.getBoolean("play_arc_conf", false)
 
@@ -25,6 +23,8 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             )
         val accountMineClass =
             "tv.danmaku.bili.ui.main2.api.AccountMine".findClassOrNull(mClassLoader)
+        val garbEntranceClass =
+            "tv.danmaku.bili.ui.main2.api.AccountMine\$GarbEntrance".from(mClassLoader)
         val splashClass = "tv.danmaku.bili.ui.splash.SplashData".findClassOrNull(mClassLoader)
             ?: "tv.danmaku.bili.ui.splash.ad.model.SplashData".findClassOrNull(mClassLoader)
         val splashShowClass = "tv.danmaku.bili.ui.splash.ad.model.SplashShowData".findClassOrNull(mClassLoader)
@@ -71,12 +71,6 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         val biliLiveRoomUserInfoClass =
             "com.bilibili.bililive.videoliveplayer.net.beans.gateway.userinfo.BiliLiveRoomUserInfo"
                 .from(mClassLoader)
-        val dmQoeInfoClass = "tv.danmaku.bili.videopage.player.features.qoe.DmQoeInfo"
-            .from(mClassLoader)
-        val geminiDmQoeInfoClass = "tv.danmaku.bili.videopage.player.gemini.qoe.GeminiDmQoeInfo"
-            .from(mClassLoader)
-        val storyFeedResponseClass = "com.bilibili.video.story.api.StoryFeedResponse"
-            .from(mClassLoader)
         val liveRoomRecommendCardClass =
             "com.bilibili.bililive.videoliveplayer.net.beans.attentioncard.LiveRoomRecommendCard"
                 .from(mClassLoader)
@@ -127,39 +121,6 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         }
                     }
 
-                    if (hidden && addChannel) {
-                        val bottom = data?.getObjectFieldAs<MutableList<Any>>("bottom")
-                        val hasChannel = bottom?.any {
-                            it.getObjectFieldAs<String?>("uri")
-                                ?.startsWith("bilibili://pegasus/channel")
-                                ?: false
-                        }
-                        if (hasChannel != null && !hasChannel) {
-                            tabClass?.new()?.run {
-                                setObjectField("tabId", "123")
-                                setObjectField("reportId", "频道Bottom")
-                                setObjectField("name", "频道")
-                                setObjectField("uri", "bilibili://main/top_category")
-                                setObjectField(
-                                    "icon",
-                                    "http://i0.hdslb.com/bfs/archive/e16c9303e9edbf23031f545fcafc44d1f60cd07b.png"
-                                )
-                                setObjectField(
-                                    "iconSelected",
-                                    "http://i0.hdslb.com/bfs/archive/f6739d905dee57d2c0429d9b66acb3f39b294aff.png"
-                                )
-                                val pos = 2
-                                setIntField("pos", pos)
-                                bottom.forEach {
-                                    it.setIntField(
-                                        "pos", it.getIntField("pos")
-                                            .let { p -> if (p >= pos) p + 1 else p })
-                                }
-                                bottom.add(0, this)
-                            }
-                        }
-                    }
-
                     configTab(data, tabClass)
 
                     if (sPrefs.getBoolean("purify_game", false) &&
@@ -205,27 +166,6 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                             }
                         }
                     } else {
-                        if (sPrefs.getBoolean("hidden", false)
-                            && sPrefs.getBoolean("modify_vip_section_style", false)
-                            && !sPrefs.getBoolean("remove_vip_section", false)
-                        ) {
-                            val vipSection = result.getObjectField("vipSectionV2")
-                            val vipId = vipSection?.getLongField("id") ?: 0L
-                            val vipUrl = vipSection?.getObjectFieldAs("url") ?: ""
-                            val vipIcon =
-                                "https://i2.hdslb.com/bfs/activity-plat/static/20220927/e369244d0b14644f5e1a06431e22a4d5/1QALxDPPso.png"
-                            result.getObjectFieldOrNullAs<MutableList<*>?>("sectionListV2")
-                                ?.firstOrNull()
-                                ?.getObjectFieldAs<MutableList<Any?>?>("itemList")?.run {
-                                    val itemClass = firstOrNull()?.javaClass ?: return@run
-                                    itemClass.new().apply {
-                                        setLongField("id", vipId)
-                                        setObjectField("title", "我的大会员")
-                                        setObjectField("uri", vipUrl)
-                                        setObjectField("icon", vipIcon)
-                                    }.let { add(0, it) }
-                                }
-                        }
                         result.getObjectFieldOrNullAs<MutableList<*>?>("sectionListV2")?.forEach { sections ->
                             try {
                                 // 将标题写入 drawerItems
@@ -305,7 +245,13 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     }
                     accountMineClass.findFieldOrNull("vipSectionRight")?.set(result, null)
                     if (sPrefs.getBoolean("custom_theme", false)) {
-                        result.setObjectField("garbEntrance", null)
+                        if (instance.clientVersionCode >= 7480200) {
+                            garbEntranceClass?.new()?.apply {
+                                setObjectField("uri", "activity://navigation/theme/")
+                            }?.let { result.setObjectField("garbEntrance", it) }
+                        } else {
+                            result.setObjectField("garbEntrance", null)
+                        }
                     }
                 }
                 splashClass, splashShowClass -> if (sPrefs.getBoolean("purify_splash", false) &&
@@ -314,7 +260,7 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     result.getObjectFieldOrNullAs<MutableList<*>>("splashList")?.clear()
                     result.getObjectFieldOrNullAs<MutableList<*>>("strategyList")?.clear()
                 }
-                defaultWordClass, defaultKeywordClass, searchRanksClass, searchReferralClass, searchReferralV2Class, followingcardSearchRanksClass -> if (sPrefs.getBoolean(
+                defaultWordClass, defaultKeywordClass, searchRanksClass, searchReferralClass, followingcardSearchRanksClass -> if (sPrefs.getBoolean(
                         "purify_search",
                         false
                     ) &&
@@ -323,6 +269,22 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     result.javaClass.fields.forEach {
                         if (!it.type.isPrimitive)
                             result.setObjectField(it.name, null)
+                    }
+                }
+                searchReferralV2Class -> if (sPrefs.getBoolean(
+                        "purify_search",
+                        false
+                    ) &&
+                    sPrefs.getBoolean("hidden", false)
+                ) {
+                    result.javaClass.declaredFields.forEach {
+                        it.isAccessible = true
+                        it.set(result, it.type.let { type ->
+                            when (type) {
+                                Int::class.javaPrimitiveType -> 0
+                                else -> null
+                            }
+                        })
                     }
                 }
                 brandSplashDataClass -> if (sPrefs.getBoolean("custom_splash", false) ||
@@ -376,21 +338,6 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         ?.forEach { it?.setIntField("playableType", 0) }
                 }
 
-                dmQoeInfoClass, geminiDmQoeInfoClass -> if (hidden &&
-                    sPrefs.getBoolean("block_dm_feedback", false)
-                ) result.callMethod("setShow", false)
-
-                storyFeedResponseClass -> if (hidden && filterStory.isNotEmpty()) {
-                    result.runCatchingOrNull {
-                        getObjectField("data")
-                            ?.getObjectFieldAs<MutableList<Any>>("items")
-                            ?.removeAll { item ->
-                                val goto = item.getObjectFieldAs<String?>("goto").orEmpty()
-                                filterStory.any { goto.contains(it) }
-                            }
-                    }
-                }
-
                 dmAdvertClass -> if (hidden && sPrefs.getBoolean("block_up_rcmd_ads", false))
                     result.setObjectField("ads", null)
 
@@ -420,13 +367,11 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             }
         }
 
-        val searchRankClass = "com.bilibili.search.api.SearchRank".findClass(mClassLoader)
+        val searchRankClass = "com.bilibili.search.api.SearchRank".findClassOrNull(mClassLoader)
         val searchGuessClass =
-            "com.bilibili.search.api.SearchReferral\$Guess".findClass(mClassLoader)
-        val searchRankV2Class = "com.bilibili.search2.api.SearchRank".from(mClassLoader) ?: searchRankClass
-        val searchGuessV2Class =
-            "com.bilibili.search2.api.SearchReferral\$Guess".from(mClassLoader) ?: searchGuessClass
-        val categoryClass = "tv.danmaku.bili.category.CategoryMeta".findClass(mClassLoader)
+            "com.bilibili.search.api.SearchReferral\$Guess".findClassOrNull(mClassLoader)
+        val searchRankV2Class = "com.bilibili.search2.api.SearchRank".findClassOrNull(mClassLoader)
+        val searchGuessV2Class = "com.bilibili.search2.api.SearchReferral\$Guess".findClassOrNull(mClassLoader)
 
         instance.fastJsonClass?.hookAfterMethod(
             "parseArray",
@@ -443,27 +388,6 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         )
                     ) {
                         result?.clear()
-                    }
-                categoryClass ->
-                    if (sPrefs.getBoolean("music_notification", false)) {
-                        val hasMusic = result?.any {
-                            it.getObjectFieldAs<String?>("mUri")
-                                ?.startsWith("bilibili://music") ?: false
-                        } ?: false
-                        if (!hasMusic) {
-                            result?.add(
-                                categoryClass.new()
-                                    .setObjectField("mTypeName", "音頻")
-                                    .setObjectField(
-                                        "mCoverUrl",
-                                        "http://i0.hdslb.com/bfs/archive/85d6dddbdc9746fed91c65c2c3eb3a0a453eadaf.png"
-                                    )
-                                    .setObjectField("mUri", "bilibili://music/home?from=category")
-                                    .setIntField("mType", 1)
-                                    .setIntField("mParentTid", 0)
-                                    .setIntField("mTid", 65543)
-                            )
-                        }
                     }
             }
         }

@@ -16,7 +16,6 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.future.future
 import me.iacn.biliroaming.hook.*
 import me.iacn.biliroaming.utils.*
-import org.json.JSONObject
 import java.util.concurrent.CompletableFuture
 
 
@@ -69,16 +68,10 @@ class XposedInit : IXposedHookLoadPackage, IXposedHookZygoteInit {
                     )
 
                     country = MainScope().future(Dispatchers.IO) {
-                        fun JSONObject.optStringFix(name: String, fallback: String = "") =
-                            if (isNull(name)) fallback else optString(name, fallback)
-                        when (fetchJson(Constant.infoUrl)?.optJSONObject("data")
-                            ?.optStringFix("country").orEmpty().ifEmpty {
-                                fetchJson(Constant.zoneUrl)?.optJSONObject("data")
-                                    ?.optStringFix("country")
-                            }) {
-                            "中国" -> "cn"
-                            "香港", "澳门" -> "hk"
-                            "台湾" -> "tw"
+                        when (fetchJson(Constant.zoneUrl)?.optJSONObject("data")?.optInt("country_code", 0)?.or(0)) {
+                            86 -> "cn"
+                            852, 853 -> "hk"
+                            886 -> "tw"
                             else -> "global"
                         }.also { Log.d("当前地区: $it") }
                     }
@@ -86,11 +79,6 @@ class XposedInit : IXposedHookLoadPackage, IXposedHookZygoteInit {
                     BiliBiliPackage(lpparam.classLoader, param.args[0] as Context)
                     if (BuildConfig.DEBUG) {
                         startHook(SSLHook(lpparam.classLoader))
-                        startHook(MossDebugHook(lpparam.classLoader))
-                        startHook(OkHttpDebugHook(lpparam.classLoader))
-                    }
-                    if (isLSPBuiltIn) {
-                        startHook(AppUpgradeHook(lpparam.classLoader))
                     }
                     startHook(HintHook(lpparam.classLoader))
                     startHook(BangumiSeasonHook(lpparam.classLoader))
@@ -99,7 +87,7 @@ class XposedInit : IXposedHookLoadPackage, IXposedHookZygoteInit {
                     startHook(CustomThemeHook(lpparam.classLoader))
                     startHook(TeenagersModeHook(lpparam.classLoader))
                     startHook(JsonHook(lpparam.classLoader))
-                    startHook(MiniProgramHook(lpparam.classLoader))
+                    startHook(ShareHook(lpparam.classLoader))
                     startHook(AutoLikeHook(lpparam.classLoader))
                     startHook(SettingHook(lpparam.classLoader))
                     startHook(SplashHook(lpparam.classLoader))
@@ -111,18 +99,7 @@ class XposedInit : IXposedHookLoadPackage, IXposedHookZygoteInit {
                     startHook(SubtitleHook(lpparam.classLoader))
                     startHook(CopyHook(lpparam.classLoader))
                     startHook(LiveRoomHook(lpparam.classLoader))
-                    //startHook(QualityHook(lpparam.classLoader))
-                    startHook(DarkSwitchHook(lpparam.classLoader))
-                    startHook(SubtitleDownloadHook(lpparam.classLoader))
-                    startHook(PlaybackSpeedHook(lpparam.classLoader))
-                    startHook(OkHttpHook(lpparam.classLoader))
-                    startHook(TextFoldHook(lpparam.classLoader))
-                    startHook(ScreenOrientationHook(lpparam.classLoader))
-                    startHook(LosslessSettingHook(lpparam.classLoader))
-                    startHook(TrialVipQualityHook(lpparam.classLoader))
-                    startHook(ChannelTabUIHook(lpparam.classLoader))
-                    startHook(FavFolderDialogHook(lpparam.classLoader))
-                    startHook(PurifyShareHook(lpparam.classLoader))
+                    startHook(QualityHook(lpparam.classLoader))
                     startHook(DynamicHook(lpparam.classLoader))
                     startHook(ProtoBufHook(lpparam.classLoader))
                     startHook(PlayArcConfHook(lpparam.classLoader))
@@ -142,14 +119,15 @@ class XposedInit : IXposedHookLoadPackage, IXposedHookZygoteInit {
                     startHook(VideoQualityHook(lpparam.classLoader))
                     startHook(PublishToFollowingHook(lpparam.classLoader))
                     startHook(UposReplaceHook(lpparam.classLoader))
-                    //startHook(SpeedHook(lpparam.classLoader))
+                    startHook(SpeedHook(lpparam.classLoader))
+                    startHook(MultiWindowHook(lpparam.classLoader))
                 }
 
                 lpparam.processName.endsWith(":web") -> {
                     BiliBiliPackage(lpparam.classLoader, param.args[0] as Context)
                     CustomThemeHook(lpparam.classLoader).insertColorForWebProcess()
                     startHook(WebViewHook(lpparam.classLoader))
-                    startHook(PurifyShareHook(lpparam.classLoader))
+                    startHook(ShareHook(lpparam.classLoader))
                     startHook(DialogBlurBackgroundHook(lpparam.classLoader))
                 }
 

@@ -1,8 +1,12 @@
 package me.iacn.biliroaming.hook
 
+import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
 import me.iacn.biliroaming.utils.*
 
 class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
+
+    private val dynamicMossV1 by Weak { "com.bapis.bilibili.app.dynamic.v1.DynamicMoss" from mClassLoader }
+    private val dynamicMossV2 by Weak { "com.bapis.bilibili.app.dynamic.v2.DynamicMoss" from mClassLoader }
 
     private val purifyTypes = run {
         sPrefs.getStringSet("customize_dynamic_type", null)
@@ -26,6 +30,7 @@ class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     private val preferVideoTab = sPrefs.getBoolean("prefer_video_tab", false)
     private val filterApplyToVideo = sPrefs.getBoolean("filter_apply_to_video", false)
     private val rmBlocked = sPrefs.getBoolean("customize_dynamic_rm_blocked", false)
+    private val rmAdLink = sPrefs.getBoolean("customize_dynamic_rm_ad_link", false)
 
     private val needFilterDynamic = purifyTypes.isNotEmpty() || purifyContents.isNotEmpty()
             || purifyUpNames.isNotEmpty() || purifyUidList.isNotEmpty() || rmBlocked
@@ -33,8 +38,7 @@ class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     override fun startHook() {
         val hidden = sPrefs.getBoolean("hidden", false)
         if (hidden && (needFilterDynamic || removeTopicOfAll || removeUpOfAll)) {
-            "com.bapis.bilibili.app.dynamic.v2.DynamicMoss".hookAfterMethod(
-                mClassLoader,
+            dynamicMossV2?.hookAfterMethod(
                 "dynAll",
                 "com.bapis.bilibili.app.dynamic.v2.DynAllReq"
             ) { param ->
@@ -47,10 +51,25 @@ class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         filterDynamic(it)
                 }
             }
+            dynamicMossV2?.hookBeforeMethod(
+                "dynAll",
+                "com.bapis.bilibili.app.dynamic.v2.DynAllReq",
+                instance.mossResponseHandlerClass
+            ) {
+                it.args[1] = it.args[1].mossResponseHandlerProxy { result ->
+                    result?.let {
+                        if (removeTopicOfAll)
+                            it.callMethod("clearTopicList")
+                        if (removeUpOfAll)
+                            it.callMethod("clearUpList")
+                        if (needFilterDynamic)
+                            filterDynamic(it)
+                    }
+                }
+            }
         }
         if (hidden && ((filterApplyToVideo && needFilterDynamic) || removeUpOfVideo)) {
-            "com.bapis.bilibili.app.dynamic.v2.DynamicMoss".hookAfterMethod(
-                mClassLoader,
+            dynamicMossV2?.hookAfterMethod(
                 "dynVideo",
                 "com.bapis.bilibili.app.dynamic.v2.DynVideoReq"
             ) { param ->
@@ -61,14 +80,43 @@ class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         filterDynamic(it)
                 }
             }
+            dynamicMossV2?.hookBeforeMethod(
+                "dynVideo",
+                "com.bapis.bilibili.app.dynamic.v2.DynVideoReq",
+                instance.mossResponseHandlerClass
+            ) {
+                it.args[1] = it.args[1].mossResponseHandlerProxy { result ->
+                    result?.let {
+                        if (removeUpOfVideo)
+                            it.callMethod("clearVideoUpList")
+                        if (filterApplyToVideo && needFilterDynamic)
+                            filterDynamic(it)
+                    }
+                }
+            }
         }
         if (hidden && preferVideoTab) {
-            "com.bapis.bilibili.app.dynamic.v1.DynamicMoss".hookAfterMethod(
-                mClassLoader,
+            dynamicMossV1?.hookAfterMethod(
                 "dynRed",
                 "com.bapis.bilibili.app.dynamic.v1.DynRedReq"
             ) { param ->
                 param.result?.callMethod("setDefaultTab", "video")
+            }
+            dynamicMossV2?.hookBeforeMethod(
+                "dynTab",
+                "com.bapis.bilibili.app.dynamic.v2.DynTabReq",
+                instance.mossResponseHandlerClass
+            ) {
+                it.args[1] = it.args[1].mossResponseHandlerReplaceProxy { reply ->
+                    reply?.callMethod("ensureScreenTabIsMutable")
+                    reply?.callMethodAs<MutableList<Any>>("getScreenTabList")?.map {
+                        it.callMethod(
+                            "setDefaultTab",
+                            it.callMethodAs<String>("getName") == "video"
+                        )
+                    }
+                    reply
+                }
             }
         }
     }
@@ -96,12 +144,22 @@ class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 continue
             }
 
-            if (purifyContents.isNotEmpty()) {
-                val modulesText = e.callMethodAs<List<Any>>("getModulesList")
-                    .joinToString(separator = "") {
-                        it.callMethod("getModuleDesc")
-                            ?.callMethodAs<String>("getText").orEmpty()
-                    }
+            if (rmAdLink || purifyContents.isNotEmpty()) {
+                val moduleList = e.callMethodAs<List<Any>>("getModulesList")
+                if (rmAdLink && moduleList.any {
+                        it.callMethodOrNull("hasModuleAdditional") == true
+                                && it.callMethod("getModuleAdditional")
+                            ?.callMethod("getTypeValue").let {
+                                it == 2 || it == 6
+                            } // additional_type_goods, additional_type_up_rcmd
+                    }) {
+                    idxList.add(idx)
+                    continue
+                }
+                val modulesText = moduleList.joinToString(separator = "") {
+                    it.callMethod("getModuleDesc")
+                        ?.callMethodAs<String>("getText").orEmpty()
+                }
                 if (modulesText.isNotEmpty() && if (contentRegexMode)
                         purifyContentRegexes.any { modulesText.contains(it) }
                     else purifyContents.any { modulesText.contains(it) }

@@ -21,37 +21,20 @@ message Field {
 message Request {
   optional Class class = 1;
   optional Field url = 2;
-  optional Field method = 3;
 }
 
 message Response {
   optional Class class = 1;
   optional Field request = 2;
-  optional Field code = 3;
-  optional Field body = 4;
-  optional Field protocol = 5;
-  optional Field headers = 6;
 }
 
 message ResponseBody {
   optional Class class = 1;
   optional Method create = 2;
   optional Method string = 3;
-  optional Method source = 4;
 }
 
 message MediaType {
-  optional Class class = 1;
-  optional Method get = 2;
-}
-
-message RealCall {
-  optional Class class = 1;
-  optional Method execute = 2;
-  optional Method enqueue = 3;
-}
-
-message Headers {
   optional Class class = 1;
   optional Method get = 2;
 }
@@ -61,27 +44,11 @@ message OkHttp {
   optional Response response = 2;
   optional ResponseBody response_body = 3;
   optional MediaType mediaType = 4;
-  optional RealCall realCall = 5;
-  optional Headers headers = 6;
-  optional Class callback = 7;
-}
-
-message Okio2 {
-  optional Class class = 1;
-  optional Class buffered_source = 2;
-  optional Method source = 3;
-  optional Method source_buffer = 4;
 }
 
 message FastJson {
   optional Class class = 1;
   optional Method parse = 2;
-}
-
-
-message ShareWrapper {
-  optional Class class = 1;
-  optional Method method = 2;
 }
 
 message ThemeName {
@@ -90,11 +57,6 @@ message ThemeName {
 }
 
 message ReportDownload {
-  optional Class class = 1;
-  optional Method method = 2;
-}
-
-message NotificationBuilder {
   optional Class class = 1;
   optional Method method = 2;
 }
@@ -113,12 +75,15 @@ message GsonHelper {
 
 message PlayerCoreService {
   optional Class class = 1;
-  optional Method get_default_speed = 2;
+  optional Method get_playback_speed = 2;
   optional Method seek_to = 3;
   optional Method on_seek_complete = 4;
-  optional Method update_speed = 6;
   optional Class seek_complete_listener = 5;
-  optional Method set_default_speed = 7;
+  reserved 6, 7, 8;
+}
+
+message PcsFacade {
+  optional Class play_speed_manager = 1;
 }
 
 message PegasusFeed {
@@ -220,162 +185,10 @@ message Settings {
   repeated HomeUserCenter home_user_center = 5;
 }
 
-message AppUpgrade {
-  optional Class upgrade_utils = 1;
-  optional Method write_channel = 2;
-  optional Method write_info = 3;
-  optional Method clean_apk_dir = 4;
-  optional Class supplier = 6;
-  optional Method check = 7;
-  optional Class upgrade_info = 8;
-  optional Class version_exception = 9;
-}
-
-message DarkSwitch {
-  optional Class user_fragment = 1;
-  optional Class theme_utils = 2;
-  optional Method switch_dark_mode = 3;
-  optional Method is_dark_follow_system = 4;
-}
-
-message MusicNotification {
-  optional Class abs_music_service = 1;
-  optional Class background_player = 2;
-  optional Method set_state = 3;
-  optional Class helper = 4;
-  optional NotificationBuilder builder = 5;
-  optional Class player_service = 6;
-  optional Class media_session_callback = 7;
-  optional Class live_helper = 8;
-  optional Class music_background_player = 9;
-  optional Field music_wrapper_player = 10;
-  optional Field music_player = 11;
-  optional Field music_player_service = 12;
-}
-
 message BiliAccounts {
   optional Class class = 1;
   optional Method get = 2;
   optional Method get_access_key = 3;
-}
-
-message ToolbarService {
-  optional Class class = 1;
-  optional Method mini_play = 2;
-}
-
-message SuperMenu {
-  optional Class class = 1;
-  optional Class menu_item_click_listener = 2;
-  optional Class menu_item_impl = 3;
-  optional Method show = 4;
-  optional Field click_listener = 5;
-}
-
-message SpeedAdapter {
-  optional Class class = 1;
-  optional Field speed_array = 2;
-}
-
-message StorySuperMenu {
-  optional Class class = 1;
-  optional Field speed_array = 2;
-}
-
-message MenuFuncSegment {
-  optional Class class = 1;
-  optional Field speed_array = 2;
-}
-
-message NewShareService {
-  optional Class class = 1;
-  optional Field speed_array = 2;
-}
-
-message PlaySpeedSetting {
-  optional Class class = 1;
-  optional Field speed_array = 2;
-  optional Field speed_text_id_array = 3;
-}
-
-message PodcastSpeedSeekBar {
-  optional Class class = 1;
-  optional Field speed_array = 2;
-  optional Field speed_name_list = 3;
-}
-
-message AbsMusicPlayerPanelSegment {
-  optional Class class = 1;
-  optional Field speed_array = 2;
-}
-
-message PlayerSpeedWidget {
-  optional Class class = 1;
-  optional Method update = 2;
-}
-
-message PlayerSettingService {
-  optional Class class = 1;
-  optional Method get_float = 2;
-}
-
-message TripleSpeedService {
-  optional Class class = 1;
-  optional Method update_speed = 2;
-}
-
-message PlaybackSpeed {
-  repeated SpeedAdapter speed_adapter = 1;
-  optional StorySuperMenu story_super_menu = 2;
-  optional MenuFuncSegment menu_func_segment = 3;
-  optional NewShareService new_share_service = 4;
-  repeated PlaySpeedSetting play_speed_setting = 5;
-  optional PodcastSpeedSeekBar podcast_speed_seek_bar = 6;
-  optional AbsMusicPlayerPanelSegment music_player_panel = 7;
-  repeated PlayerSpeedWidget player_speed_widget = 8;
-  optional PlayerSettingService player_setting_service = 9;
-  repeated TripleSpeedService triple_speed_service = 10;
-}
-
-message OrientationProcessor {
-  optional Class class = 1;
-  optional Field activity = 2;
-  optional Method start_gravity_sensor = 3;
-  optional Method switch_orientation = 4;
-  optional Method correct_orientation = 5;
-}
-
-message ScreenLayoutHelper {
-  optional Class class = 1;
-  optional Field activity = 2;
-  optional Method on_state_change = 3;
-}
-
-message BiliAccountInfo {
-  optional Class class = 1;
-  optional Method get = 2;
-  optional Method is_effective_vip = 3;
-}
-
-message QualityViewHolder {
-  optional Class class = 1;
-  optional Method bind_online = 2;
-}
-
-message BLKV {
-  optional Class class = 1;
-  optional Method get_by_name = 2;
-  optional Method get_by_file = 3;
-}
-
-message FavFolderDialog {
-  optional Class class = 1;
-  optional Field check_box = 2;
-}
-
-message IPlayerController {
-  optional Class class = 1;
-  optional Method get_player = 2;
 }
 
 message PlayerFullStoryWidget {
@@ -442,20 +255,6 @@ message Comment3Copy {
 
 message HookInfo {
   int64 last_update_time = 1;
-  optional AppUpgrade app_upgrade = 500;
-  optional DarkSwitch dark_switch = 501;
-  optional ToolbarService toolbar_service = 502;
-  optional Okio2 okio2 = 503;
-  optional Method set_line_to_all_count = 504;
-  optional SuperMenu super_menu = 505;
-  optional PlaybackSpeed playback_speed = 506;
-  optional OrientationProcessor orientation_processor = 507;
-  optional ScreenLayoutHelper screen_layout_helper = 508;
-  optional BiliAccountInfo bili_account_info = 509;
-  repeated QualityViewHolder quality_view_holder = 510;
-  optional BLKV blkv = 511;
-  optional FavFolderDialog fav_folder_dialog = 512;
-  optional IPlayerController player_controller = 513;
   optional MapIds map_ids = 2;
   int32 client_version_code = 3;
   int32 module_version_code = 4;
@@ -471,7 +270,6 @@ message HookInfo {
   optional Method skin_list = 19;
   optional ThemeProcessor theme_processor = 20;
   optional Class theme_list_click = 22;
-  optional ShareWrapper share_wrapper = 23;
   optional ThemeName theme_name = 24;
   optional Section section = 25;
   optional SignQuery sign_query = 27;
@@ -479,7 +277,6 @@ message HookInfo {
   optional Drawer drawer = 30;
   optional Settings settings = 31;
   optional DownloadThread download_thread = 34;
-  optional MusicNotification music_notification = 38;
   optional BangumiParams bangumi_params = 45;
   optional GsonHelper gson_helper = 46;
   optional PlayerCoreService player_core_service = 47;
@@ -517,4 +314,5 @@ message HookInfo {
   optional Class publish_to_following_config = 90;
   optional Comment3Copy comment3_copy = 91;
   repeated PlayerQualityService player_quality_service = 92;
+  optional Class play_speed_manager = 93;
 }
